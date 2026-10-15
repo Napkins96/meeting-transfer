@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meeting Transcriber</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Literata:opsz,wght@7..72,400;7..72,500&display=swap" rel="stylesheet">
+<style>
+/* Layout: a working desk. Transcript is the page; controls ride a slim top bar; speakers + settings sit in a side rail. */
+:root{
+  --paper:#F5F7F5; --surface:#FFFFFF; --ink:#18221E; --muted:#5B6862; --line:#DCE2DE;
+  --accent:#1E6A57; --accent-ink:#FFFFFF; --rec:#C3372C; --hl:#E4F0EB;
+  --s1:#1E6A57; --s2:#9A4A15; --s3:#3A55A8; --s4:#8A3B78; --s5:#5F7D17; --s6:#A33845; --s7:#2C7B93; --s8:#6B5B2A;
+  --f-ui:"Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --f-text:"Literata", Georgia, "Times New Roman", serif;
+  --f-mono:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+  --paper:#111613; --surface:#18201C; --ink:#E3EAE6; --muted:#93A29A; --line:#2A3430;
+  --accent:#62C3A6; --accent-ink:#0D1A15; --rec:#F06A5E; --hl:#1F2E28;
+  --s1:#62C3A6; --s2:#E59A62; --s3:#8FA6F0; --s4:#D98BC6; --s5:#AFCB62; --s6:#EE8592; --s7:#6FC6DF; --s8:#CDB778;
+  color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --paper:#111613; --surface:#18201C; --ink:#E3EAE6; --muted:#93A29A; --line:#2A3430;
+  --accent:#62C3A6; --accent-ink:#0D1A15; --rec:#F06A5E; --hl:#1F2E28;
+  --s1:#62C3A6; --s2:#E59A62; --s3:#8FA6F0; --s4:#D98BC6; --s5:#AFCB62; --s6:#EE8592; --s7:#6FC6DF; --s8:#CDB778;
+  color-scheme:dark; }
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.5 var(--f-ui);}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+.bar{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line);
+  display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:12px 20px}
+.brand{font-weight:600;letter-spacing:.01em;margin-right:auto}
+.brand small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.rec{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:999px;padding:9px 18px;
+  background:var(--rec);color:#fff;font-weight:600}
+.rec::before{content:"";width:10px;height:10px;border-radius:50%;background:#fff}
+.rec.on{background:var(--ink);color:var(--paper)}
+.rec.on::before{border-radius:2px;background:var(--rec)}
+#clock{font-size:18px;min-width:5ch}
+.meter{width:90px;height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+#meterFill{height:100%;width:0;background:var(--accent);transition:width 60ms linear}
+.state{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);min-width:9ch}
+.state.talk{color:var(--accent)}
+
+.notice{margin:12px 20px 0;padding:10px 14px;border:1px solid var(--line);border-left:3px solid var(--rec);
+  background:var(--surface);border-radius:6px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.notice.info{border-left-color:var(--accent)}
+
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:28px;padding:20px;max-width:1240px;margin:0 auto}
+@media (max-width:860px){.layout{grid-template-columns:minmax(0,1fr)}}
+.doc{min-width:0}
+h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+h3{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px;font-weight:600}
+.head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:0 0 12px}
+.actions{display:flex;flex-wrap:wrap;gap:6px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px 11px;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.45;cursor:default}
+
+.transcript{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 24px 20px;min-height:240px}
+.block{display:grid;grid-template-columns:132px minmax(0,1fr);gap:4px 18px;padding:14px 0 0}
+@media (max-width:560px){.block{grid-template-columns:minmax(0,1fr)} .transcript{padding:6px 14px 16px}}
+.who{display:flex;flex-direction:column;gap:2px;padding-top:3px}
+.who b{font-weight:600;font-size:13px;color:var(--c,var(--ink))}
+.who b::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);margin-right:7px;vertical-align:1px}
+.who.cont b{opacity:.5}
+.who time{font:12px var(--f-mono);color:var(--muted)}
+.body{font:17px/1.65 var(--f-text);max-width:68ch}
+.u{border-radius:3px;cursor:pointer;transition:background .15s}
+.u:hover{background:var(--hl)}
+.u.locked{text-decoration:underline dotted var(--muted);text-underline-offset:4px}
+.live{color:var(--muted);font-style:italic}
+.pause{display:flex;align-items:center;gap:10px;margin:16px 0 2px;color:var(--muted);font:12px var(--f-mono)}
+.pause::before,.pause::after{content:"";flex:1;border-top:1px dashed var(--line)}
+.empty{padding:28px 6px;color:var(--muted);max-width:60ch}
+.empty p{margin:0 0 12px}
+.empty ol{margin:0 0 16px;padding-left:20px}
+
+.summary{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:20px 24px;margin:0 0 24px}
+.summary h2{margin-bottom:14px}
+.stats{display:flex;flex-wrap:wrap;gap:8px 28px;margin:0 0 18px}
+.stat span{display:block;font-size:12px;color:var(--muted)}
+.stat strong{font:500 20px var(--f-mono);font-variant-numeric:tabular-nums}
+.share{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:0 0 6px;background:var(--line)}
+.share i{display:block;height:100%;background:var(--c)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--muted);margin:0 0 18px}
+.legend b{color:var(--c);font-weight:600}
+.sgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px 28px}
+.sgrid section{min-width:0}
+.sgrid ul{margin:0;padding-left:18px}
+.sgrid li{margin:0 0 8px;font:15px/1.5 var(--f-text)}
+.sgrid li small{display:block;font:12px var(--f-ui);color:var(--muted)}
+.takeaways{grid-column:1/-1}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:13px}
+.sumnote{font-size:12px;color:var(--muted);margin:16px 0 0}
+
+.side{display:flex;flex-direction:column;gap:22px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px}
+.spk{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.spk li{display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:8px}
+.spk .dot{width:10px;height:10px;border-radius:50%;background:var(--c)}
+.spk input{width:100%;border:1px solid transparent;background:transparent;border-radius:4px;padding:3px 5px;font-weight:600;color:var(--c)}
+.spk input:hover,.spk input:focus{border-color:var(--line);background:var(--paper)}
+.spk .tt{font:12px var(--f-mono);color:var(--muted)}
+.hint{font-size:12px;color:var(--muted);margin:10px 0 0}
+.field{display:flex;flex-direction:column;gap:4px;margin:0 0 14px}
+.field label{font-size:13px;font-weight:500}
+.field .row{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.field select{border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--paper)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+details.panel summary{cursor:pointer;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+details.panel p{font-size:13px;margin:10px 0 0;color:var(--ink)}
+details.panel b{font-weight:600}
+
+.menu{position:fixed;z-index:20;background:var(--surface);border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 8px 28px rgba(0,0,0,.18);padding:6px;min-width:190px}
+.menu p{margin:4px 8px 6px;font-size:12px;color:var(--muted)}
+.menu button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:none;padding:6px 8px;border-radius:5px;font-size:14px}
+.menu button:hover{background:var(--hl)}
+.menu button i{width:8px;height:8px;border-radius:50%;background:var(--c)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Meeting Transcriber<small>Live transcript, speaker changes, key takeaways</small></div>
+  <div class="controls">
+    <button id="recBtn" class="rec" type="button">Start recording</button>
+    <span id="clock" class="mono" aria-label="Elapsed time">00:00</span>
+    <div class="meter" aria-hidden="true"><div id="meterFill"></div></div>
+    <span id="vadState" class="state" aria-live="polite">Mic off</span>
+  </div>
+</header>
+<div id="notice" class="notice" hidden></div>
+
+<main class="layout">
+  <div class="doc">
+    <div id="summary" class="summary" hidden></div>
+    <div class="head">
+      <h2>Transcript</h2>
+      <div class="actions">
+        <button class="btn" id="copyTxt" type="button">Copy</button>
+        <button class="btn" id="dlTxt" type="button">Download .txt</button>
+        <button class="btn" id="dlMd" type="button">Download .md</button>
+        <button class="btn primary" id="copyClaude" type="button">Summarize with Claude</button>
+        <button class="btn" id="clearBtn" type="button">Clear</button>
+      </div>
+    </div>
+    <div id="transcript" class="transcript" aria-live="polite">
+      <div id="empty" class="empty">
+        <p>Press <b>Start recording</b> and allow the microphone. Words appear as they are spoken.</p>
+        <ol>
+          <li>A short pause starts a new paragraph. A long pause gets a marker.</li>
+          <li>When the voice changes, a new speaker label starts. Click any line to move it to a different speaker. Rename speakers on the right.</li>
+          <li>Press <b>Stop</b> and the key takeaways, action items, decisions and open questions appear above the transcript.</li>
+        </ol>
+        <button class="btn" id="sampleBtn" type="button">Load a sample meeting</button>
+      </div>
+    </div>
+  </div>
+
+  <aside class="side">
+    <section class="panel">
+      <h3>Speakers</h3>
+      <ul id="speakerList" class="spk"></ul>
+      <p class="hint" id="spkHint">Speakers show up here once someone talks. Click a name to rename it.</p>
+    </section>
+
+    <section class="panel">
+      <h3>Settings</h3>
+      <div class="field">
+        <label for="lang">Language spoken</label>
+        <select id="lang">
+          <option value="en-US">English (US)</option>
+          <option value="en-GB">English (UK)</option>
+          <option value="es-US">Spanish (US)</option>
+          <option value="es-MX">Spanish (Mexico)</option>
+          <option value="es-ES">Spanish (Spain)</option>
+          <option value="fr-FR">French</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="paraGap">New paragraph after a pause of</label>
+        <input type="range" id="paraGap" min="0.6" max="4" step="0.1" value="1.5">
+        <div class="row"><span>shorter</span><span id="paraGapVal" class="mono">1.5 s</span><span>longer</span></div>
+      </div>
+      <div class="field">
+        <label for="sens">Voice-change sensitivity</label>
+        <input type="range" id="sens" min="1" max="10" step="1" value="6">
+        <div class="row"><span>fewer speakers</span><span id="sensVal" class="mono">6</span><span>more speakers</span></div>
+      </div>
+      <div class="field">
+        <label for="maxSpk">People in the meeting</label>
+        <select id="maxSpk">
+          <option value="0">Detect automatically</option>
+          <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+          <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+        </select>
+      </div>
+      <button class="btn" id="recheckBtn" type="button" disabled>Re-check speakers</button>
+      <p class="hint">Re-check runs speaker grouping again over the whole recording with these settings. Lines you moved by hand stay where you put them.</p>
+    </section>
+
+    <details class="panel">
+      <summary>How it works</summary>
+      <p><b>Speech to text.</b> Your browser's built-in speech recognizer types the words. Chrome sends the audio to Google's speech service to do this; Safari on a Mac can run it on the device.</p>
+      <p><b>Pause detection.</b> The page measures loudness about 23 times a second and learns the room's background level. Sound well above that level counts as speech; quiet longer than your pause setting starts a new paragraph.</p>
+      <p><b>Speaker changes.</b> For each stretch of speech it builds a small voiceprint: the shape of the voice's spectrum (MFCCs, the same features pro tools start from) plus the speaker's pitch. A stretch that doesn't match any known voiceprint starts a new speaker. When you stop, it groups every stretch again with the full recording in view, which is more accurate than the live guess.</p>
+      <p><b>Takeaways.</b> The summary picks the lines that carry the meeting's most repeated subjects, then pulls out commitments, decisions and questions by their wording. For a summary Claude writes itself, press <b>Summarize with Claude</b>: it copies the transcript and opens Meeting Summarizer, where you paste it.</p>
+    </details>
+  </aside>
+</main>
+<div id="menu" class="menu" hidden role="menu"></div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const STORE_KEY = 'meeting-transcriber.session.v1';
+
+/* ---------------- state ---------------- */
+const state = {
+  utts: [], speakers: [], nextUtt: 1, nextSpk: 1,
+  running: false, stopping: false, t0: 0, timeBase: 0,
+  interim: '', interimSince: null, sample: false, edited: false
+};
+const settings = { lang: 'en-US', paraGap: 1.5, longPause: 5, sens: 6, maxSpk: 0 };
+const thr = () => 1.2 - settings.sens * 0.09;           // voiceprint distance that counts as "same speaker"
+const now = () => (performance.now() - state.t0) / 1000;
+
+/* ---------------- DSP: FFT, mel filterbank, MFCC, pitch ---------------- */
+const N = 2048, NMEL = 26, NCEP = 12;
+let FD = N / 48000;                                      // frame duration, set from real sample rate
+const hamming = new Float64Array(N);
+for (let i = 0; i < N; i++) hamming[i] = 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (N - 1));
+const cosT = new Float64Array(N / 2), sinT = new Float64Array(N / 2), rev = new Uint32Array(N);
+for (let k = 0; k < N / 2; k++) { cosT[k] = Math.cos(2 * Math.PI * k / N); sinT[k] = Math.sin(2 * Math.PI * k / N); }
+for (let i = 0, bits = Math.log2(N); i < N; i++) { let r = 0, x = i; for (let b = 0; b < bits; b++) { r = (r << 1) | (x & 1); x >>= 1; } rev[i] = r; }
+const fre = new Float64Array(N), fim = new Float64Array(N);
+function fft(re, im) {
+  for (let i = 0; i < N; i++) { const j = rev[i]; if (j > i) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+  for (let size = 2; size <= N; size *= 2) {
+    const half = size / 2, step = N / size;
+    for (let i = 0; i < N; i += size) for (let j = 0; j < half; j++) {
+      const k = j * step, a = i + j + half, c = cosT[k], s = sinT[k];
+      const tr = re[a] * c + im[a] * s, ti = im[a] * c - re[a] * s;
+      re[a] = re[i + j] - tr; im[a] = im[i + j] - ti; re[i + j] += tr; im[i + j] += ti;
+    }
+  }
+}
+let melBank = null;
+function buildMel(sr) {
+  const mel = f => 2595 * Math.log10(1 + f / 700), inv = m => 700 * (10 ** (m / 2595) - 1);
+  const lo = mel(100), hi = mel(Math.min(7000, sr / 2 - 100));
+  const pts = []; for (let i = 0; i < NMEL + 2; i++) pts.push(Math.floor((N + 1) * inv(lo + (hi - lo) * i / (NMEL + 1)) / sr));
+  melBank = [];
+  for (let m = 1; m <= NMEL; m++) {
+    const w = []; for (let k = pts[m - 1]; k <= pts[m + 1]; k++) {
+      const v = k < pts[m] ? (k - pts[m - 1]) / Math.max(1, pts[m] - pts[m - 1]) : (pts[m + 1] - k) / Math.max(1, pts[m + 1] - pts[m]);
+      if (v > 0) w.push([k, v]);
+    }
+    melBank.push(w);
+  }
+}
+const dctT = []; for (let k = 1; k <= NCEP; k++) { const row = new Float64Array(NMEL); for (let m = 0; m < NMEL; m++) row[m] = Math.cos(Math.PI * k * (m + 0.5) / NMEL); dctT.push(row); }
+function mfcc(buf) {
+  for (let i = 0; i < N; i++) { fre[i] = (buf[i] || 0) * hamming[i]; fim[i] = 0; }
+  fft(fre, fim);
+  const le = new Float64Array(NMEL);
+  for (let m = 0; m < NMEL; m++) { let e = 1e-10; for (const [k, v] of melBank[m]) e += v * (fre[k] * fre[k] + fim[k] * fim[k]); le[m] = Math.log(e); }
+  const out = new Float64Array(NCEP);
+  for (let k = 0; k < NCEP; k++) { let s = 0; const row = dctT[k]; for (let m = 0; m < NMEL; m++) s += row[m] * le[m]; out[k] = s; }
+  return out;
+}
+let dec = 4, dbuf = null;
+function pitch(buf, sr) {
+  const L = Math.floor(N / dec), srd = sr / dec;
+  let mean = 0;
+  for (let i = 0; i < L; i++) { let s = 0; for (let j = 0; j < dec; j++) s += buf[i * dec + j]; dbuf[i] = s / dec; mean += dbuf[i]; }
+  mean /= L; for (let i = 0; i < L; i++) dbuf[i] -= mean;
+  const minLag = Math.floor(srd / 400), maxLag = Math.min(L - 32, Math.ceil(srd / 70));
+  const r = new Float64Array(maxLag + 2); let best = 0;
+  for (let l = minLag; l <= maxLag; l++) {
+    let xy = 0, xx = 0, yy = 0;
+    for (let i = 0; i < L - l; i++) { const a = dbuf[i], b = dbuf[i + l]; xy += a * b; xx += a * a; yy += b * b; }
+    r[l] = xy / (Math.sqrt(xx * yy) + 1e-12); if (r[l] > best) best = r[l];
+  }
+  if (best < 0.5) return null;
+  for (let l = minLag + 1; l < maxLag; l++) {                // first strong peak = true period, avoids octave-down errors
+    if (r[l] >= 0.88 * best && r[l] >= r[l - 1] && r[l] >= r[l + 1]) return srd / l;
+  }
+  return null;
+}
+
+/* ---------------- audio engine: VAD + voiceprint per speech segment ---------------- */
+const audio = { ctx: null, stream: null, proc: null, noise: -50, db: -90, inSpeech: false, onCount: 0, silentFor: 0,
+  lastLoudT: 0, seg: null, segments: [], g: { n: 0, mean: new Float64Array(NCEP), m2: new Float64Array(NCEP) } };
+const newSeg = t => ({ t0: t, t1: t, n: 0, sum: new Float64Array(NCEP), pitches: [] });
+function processFrame(buf, t) {
+  let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+  const db = 10 * Math.log10(s / buf.length + 1e-12); audio.db = db;
+  const loud = db > audio.noise + 9 && db > -62;
+  if (!loud) audio.noise = db < audio.noise ? 0.8 * audio.noise + 0.2 * db : 0.985 * audio.noise + 0.015 * db;
+  else audio.noise += 0.01;                                // slowly tolerate a steady noise source
+  if (loud) {
+    audio.silentFor = 0; audio.lastLoudT = t;
+    if (!audio.inSpeech && ++audio.onCount >= 2) { audio.inSpeech = true; audio.seg = newSeg(t - 2 * FD); }
+    if (audio.inSpeech) addFeatures(audio.seg, buf);
+  } else {
+    audio.onCount = 0;
+    if (audio.inSpeech && (audio.silentFor += FD) >= 0.3) {
+      audio.seg.t1 = audio.lastLoudT;
+      if (audio.seg.n >= 4) audio.segments.push(audio.seg);
+      audio.seg = null; audio.inSpeech = false;
+    }
+  }
+}
+function addFeatures(seg, buf) {
+  const c = mfcc(buf), g = audio.g; g.n++;
+  for (let i = 0; i < NCEP; i++) { seg.sum[i] += c[i]; const d = c[i] - g.mean[i]; g.mean[i] += d / g.n; g.m2[i] += d * (c[i] - g.mean[i]); }
+  seg.n++; seg.t1 = audio.lastLoudT;
+  const p = pitch(buf, audio.ctx.sampleRate); if (p) seg.pitches.push(p);
+}
+const median = a => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y); return b[b.length >> 1]; };
+function embOf(segs) {
+  const sum = new Float64Array(NCEP); let n = 0; const ps = [];
+  for (const s of segs) { for (let i = 0; i < NCEP; i++) sum[i] += s.sum[i]; n += s.n; ps.push(...s.pitches); }
+  if (!n) return null;
+  return { m: Array.from(sum, v => v / n), p: ps.length >= 5 ? median(ps) : null, n };
+}
+function gStd() {
+  const g = audio.g, out = new Array(NCEP);
+  for (let i = 0; i < NCEP; i++) out[i] = g.n > 20 ? Math.max(Math.sqrt(g.m2[i] / (g.n - 1)), 1e-3) : 4;
+  return out;
+}
+function dist(a, b, sd = gStd()) {
+  let s = 0; for (let i = 0; i < NCEP; i++) { const d = (a.m[i] - b.m[i]) / sd[i]; s += d * d; }
+  const dm = Math.sqrt(s / NCEP), dp = a.p && b.p ? Math.abs(Math.log2(a.p / b.p)) : 0;
+  return Math.sqrt(dm * dm + (1.5 * dp) ** 2);
+}
+function mergeEmb(list) {
+  const m = new Array(NCEP).fill(0); let n = 0, pw = 0, pl = 0;
+  for (const e of list) { if (!e) continue; for (let i = 0; i < NCEP; i++) m[i] += e.m[i] * e.n; n += e.n; if (e.p) { pl += Math.log2(e.p) * e.n; pw += e.n; } }
+  if (!n) return null;
+  return { m: m.map(v => v / n), p: pw ? 2 ** (pl / pw) : null, n };
+}
+
+/* ---------------- speakers ---------------- */
+function usedColors() { return new Set(state.speakers.map(s => s.color)); }
+function newSpeaker() {
+  const used = usedColors(); let color = 1; while (used.has(color) && color < 8) color++;
+  if (used.has(color)) color = ((state.nextSpk - 1) % 8) + 1;
+  const s = { id: state.nextSpk++, name: 'Speaker ' + (state.speakers.length + 1), color, custom: false };
+  state.speakers.push(s); return s.id;
+}
+const spkById = id => state.speakers.find(s => s.id === id);
+function centroid(id) { return mergeEmb(state.utts.filter(u => u.spk === id).map(u => u.emb)); }
+function assignOnline(emb, prev) {
+  if (!state.speakers.length) return newSpeaker();
+  if (!emb || emb.n * FD < 0.5) return prev ?? state.speakers[0].id;
+  const sd = gStd(); let best = null, bd = Infinity;
+  for (const s of state.speakers) {
+    const c = centroid(s.id); if (!c) continue;
+    let d = dist(emb, c, sd); if (s.id === prev) d *= 0.9;
+    if (d < bd) { bd = d; best = s.id; }
+  }
+  if (best == null) { // first voiceprint we have: attach to the speaker already shown
+    return prev ?? state.speakers[0].id;
+  }
+  if (bd < thr()) return best;
+  if (emb.n * FD < 0.8) return best;                                  // too short to trust as a new voice
+  if (settings.maxSpk && state.speakers.length >= settings.maxSpk) return best;
+  return newSpeaker();
+}
+
+/* ---------------- recognized text -> utterances ---------------- */
+function takeSegments(tNow) {
+  let segs = audio.segments.splice(0);
+  if (!segs.length && audio.seg && audio.seg.n > 0) {                 // still talking: take what we have so far
+    segs = [audio.seg]; audio.seg = newSeg(audio.lastLoudT);
+  }
+  segs = segs.filter(s => s.n * FD >= 0.2);
+  let start = segs.length - 1;                                        // keep only the run of speech leading up to this text
+  while (start > 0 && segs[start].t0 - segs[start - 1].t1 < 2.5) start--;
+  return segs.slice(Math.max(0, start));
+}
+function addFinal(text, tNow = now()) {
+  text = text.replace(/\s+/g, ' ').trim(); if (!text) return;
+  const segs = takeSegments(tNow);
+  const prev = state.utts.length ? state.utts[state.utts.length - 1].spk : null;
+  if (!segs.length) {
+    const t0 = state.interimSince ?? Math.max(0, tNow - 1.5);
+    pushUtt(text, t0, Math.max(t0, tNow - 0.6), null, prev ?? assignOnline(null, null));
+    return;
+  }
+  // look for a voice change inside this stretch (no pause long enough for the recognizer to break)
+  const sd = gStd(), runs = [[segs[0]]];
+  for (let i = 1; i < segs.length; i++) {
+    const a = embOf(runs[runs.length - 1]), b = embOf([segs[i]]);
+    const longEnough = a.n * FD >= 0.8 && b.n * FD >= 0.8;
+    if (longEnough && dist(a, b, sd) > thr() * 1.15) runs.push([segs[i]]); else runs[runs.length - 1].push(segs[i]);
+  }
+  const words = text.split(' ');
+  if (runs.length === 1 || words.length < 4) {
+    const emb = embOf(segs);
+    pushUtt(text, segs[0].t0, segs[segs.length - 1].t1, emb, assignOnline(emb, prev));
+    return;
+  }
+  const total = runs.reduce((s, r) => s + r.reduce((x, g) => x + g.n, 0), 0);
+  let wi = 0, p = prev;
+  runs.forEach((r, k) => {
+    const n = r.reduce((x, g) => x + g.n, 0);
+    const take = k === runs.length - 1 ? words.length - wi : Math.max(1, Math.round(words.length * n / total));
+    const part = words.slice(wi, wi + take).join(' '); wi += take;
+    if (!part) return;
+    const emb = embOf(r); p = assignOnline(emb, p);
+    pushUtt(part, r[0].t0, r[r.length - 1].t1, emb, p);
+  });
+}
+function pushUtt(text, t0, t1, emb, spk) {
+  state.utts.push({ id: state.nextUtt++, text, t0, t1, emb, spk, locked: false });
+  state.interim = ''; state.interimSince = null;
+  render(); save();
+}
+
+/* ---------------- recognizer ---------------- */
+let rec = null, restarts = [];
+function startRec() {
+  rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = settings.lang;
+  rec.onresult = e => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) addFinal(r[0].transcript); else interim += r[0].transcript;
+    }
+    if (interim && state.interimSince == null) state.interimSince = Math.max(0, now() - 0.8);
+    state.interim = interim.trim(); renderLive();
+  };
+  rec.onerror = e => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { notice('The browser blocked speech recognition. Allow the microphone for this page and try again.'); stop(true); }
+    else if (e.error === 'network') notice('The speech service could not be reached. Check your internet connection; recording continues and will pick up again when it is back.');
+    else if (e.error === 'language-not-supported') notice('This browser cannot recognize ' + settings.lang + '. Pick another language.');
+  };
+  rec.onend = () => {
+    if (state.running) {
+      const t = performance.now(); restarts = restarts.filter(x => t - x < 10000); restarts.push(t);
+      if (restarts.length > 6) notice('Speech recognition keeps stopping. In Chrome, check that this page is allowed to use the microphone.');
+      setTimeout(() => { if (state.running) try { rec.start(); } catch (_) {} }, 200);
+    } else if (state.stopping) finishStop();
+  };
+  rec.start();
+}
+
+/* ---------------- start / stop ---------------- */
+async function start() {
+  hideNotice();
+  if (!SR) { notice('This browser has no built-in speech recognition. Open this file in Google Chrome, or Safari on a recent Mac.'); return; }
+  if (state.sample) { state.utts = []; state.speakers = []; state.sample = false; $('#summary').hidden = true; state.timeBase = 0; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } }); }
+  catch (e) { notice('The microphone is blocked or missing. Allow microphone access for this page in the browser\'s address bar, then press Start again.'); return; }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  FD = N / ctx.sampleRate; dec = Math.max(1, Math.floor(ctx.sampleRate / 12000)); dbuf = new Float64Array(Math.floor(N / dec)); buildMel(ctx.sampleRate);
+  const src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(N, 1, 1), sink = ctx.createGain();
+  sink.gain.value = 0; proc.onaudioprocess = e => processFrame(e.inputBuffer.getChannelData(0), now());
+  src.connect(proc); proc.connect(sink); sink.connect(ctx.destination);
+  Object.assign(audio, { ctx, stream, proc, seg: null, segments: [], inSpeech: false, onCount: 0, silentFor: 0 });
+  state.t0 = performance.now() - state.timeBase * 1000;
+  state.running = true; state.edited = false; $('#summary').hidden = true;
+  startRec(); updateUI(); tick();
+}
+let stopTimer = null;
+function stop(force) {
+  if (!state.running) return;
+  state.running = false; state.stopping = true; updateUI();
+  try { rec.stop(); } catch (_) {}
+  stopTimer = setTimeout(finishStop, force ? 0 : 1800);               // give the recognizer a moment to deliver the last words
+}
+function finishStop() {
+  if (!state.stopping) return; state.stopping = false; clearTimeout(stopTimer);
+  if (audio.inSpeech && audio.seg) { audio.seg.t1 = audio.lastLoudT; audio.segments.push(audio.seg); audio.seg = null; audio.inSpeech = false; }
+  if (state.interim) addFinal(state.interim);
+  state.interim = ''; state.interimSince = null;
+  state.timeBase = now();
+  try { audio.stream.getTracks().forEach(t => t.stop()); audio.ctx.close(); } catch (_) {}
+  audio.db = -90;
+  if (!state.edited) recluster(false);
+  render(); renderSummary(); save(); updateUI();
+}
+
+/* ---------------- offline re-grouping with the whole recording in view ---------------- */
+function recluster(manual) {
+  const items = state.utts.filter(u => !u.locked && u.emb && u.emb.n * FD >= 0.8);
+  if (items.length < 2) { if (manual) notice('There is not enough recorded voice yet to re-check speakers.', true); return; }
+  const sd = gStd(), k = settings.maxSpk;
+  let cl = items.map(u => ({ members: [u], emb: u.emb, first: u.t0 }));
+  while (cl.length > 1) {
+    let bi = -1, bj = -1, bd = Infinity;
+    for (let i = 0; i < cl.length; i++) for (let j = i + 1; j < cl.length; j++) { const d = dist(cl[i].emb, cl[j].emb, sd); if (d < bd) { bd = d; bi = i; bj = j; } }
+    if (k ? cl.length <= k : bd >= thr()) break;
+    const a = cl[bi], b = cl[bj];
+    cl[bi] = { members: a.members.concat(b.members), emb: mergeEmb([a.emb, b.emb]), first: Math.min(a.first, b.first) };
+    cl.splice(bj, 1);
+  }
+  cl.sort((a, b) => a.first - b.first);
+  const old = new Map(state.speakers.map(s => [s.id, s])), keep = [], usedOld = new Set();
+  for (const c of cl) {                                               // inherit the old speaker (name, color) that overlaps most
+    const counts = new Map(); c.members.forEach(u => counts.set(u.spk, (counts.get(u.spk) || 0) + 1));
+    const pick = [...counts].filter(([id]) => !usedOld.has(id) && old.has(id)).sort((x, y) => y[1] - x[1])[0];
+    let sp; if (pick) { sp = old.get(pick[0]); usedOld.add(sp.id); } else { sp = { id: state.nextSpk++, name: '', color: 0, custom: false }; }
+    keep.push(sp); c.spk = sp.id; c.members.forEach(u => u.spk = sp.id);
+  }
+  state.speakers = keep.concat(state.speakers.filter(s => !usedOld.has(s.id) && state.utts.some(u => u.locked && u.spk === s.id)));
+  const colors = usedColors(); state.speakers.forEach(s => { if (!s.color) { let c = 1; while (colors.has(c) && c < 8) c++; s.color = c; colors.add(c); } });
+  let prev = null;
+  for (const u of state.utts) {                                       // short or voiceless lines: nearest voice, else stay with neighbor
+    if (!u.locked && !items.includes(u)) {
+      if (u.emb && u.emb.n * FD >= 0.3) { let bd = Infinity; for (const c of cl) { const d = dist(u.emb, c.emb, sd); if (d < bd) { bd = d; u.spk = c.spk; } } }
+      else if (prev != null) u.spk = prev;
+    }
+    prev = u.spk;
+  }
+  tidySpeakers();
+  if (manual) { render(); if (!$('#summary').hidden) renderSummary(); save(); }
+}
+function tidySpeakers() {
+  const order = []; state.utts.forEach(u => { if (!order.includes(u.spk)) order.push(u.spk); });
+  state.speakers = order.map(spkById).filter(Boolean);
+  let n = 1; state.speakers.forEach(s => { if (!s.custom) s.name = 'Speaker ' + n; n++; });
+}
+
+/* ---------------- rendering ---------------- */
+const fmt = t => { t = Math.max(0, Math.round(t)); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : String(m).padStart(2, '0')) + ':' + String(s).padStart(2, '0'); };
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const cvar = s => `var(--s${s ? s.color : 1})`;
+function clean(t) {
+  t = t.trim(); if (!t) return t;
+  t = t[0].toUpperCase() + t.slice(1);
+  return /[.!?…,;:]$/.test(t) ? t : t + '.';
+}
+function blocks() {
+  const out = []; let prev = null;
+  for (const u of state.utts) {
+    const gap = prev ? u.t0 - prev.t1 : 0;
+    if (!prev || u.spk !== prev.spk || gap >= settings.paraGap) out.push({ spk: u.spk, t0: u.t0, cont: !!prev && u.spk === prev.spk, pause: prev && gap >= settings.longPause ? gap : 0, utts: [] });
+    out[out.length - 1].utts.push(u); prev = u;
+  }
+  return out;
+}
+let liveEl = null;
+function render() {
+  const box = $('#transcript'), nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 160;
+  [...box.children].forEach(c => { if (c.id !== 'empty') c.remove(); });
+  $('#empty').hidden = state.utts.length > 0 || state.running;
+  for (const b of blocks()) {
+    if (b.pause) box.append(el('div', 'pause', 'pause · ' + Math.round(b.pause) + ' s'));
+    const sp = spkById(b.spk), row = el('div', 'block'), who = el('div', 'who' + (b.cont ? ' cont' : ''));
+    who.style.setProperty('--c', cvar(sp));
+    who.append(el('b', null, sp ? sp.name : 'Speaker'), el('time', null, fmt(b.t0)));
+    const body = el('div', 'body');
+    b.utts.forEach(u => { const s = el('span', 'u' + (u.locked ? ' locked' : ''), clean(u.text) + ' '); s.dataset.id = u.id; s.tabIndex = 0; body.append(s); });
+    row.append(who, body); box.append(row);
+  }
+  liveEl = el('div', 'block'); liveEl.hidden = true;
+  const lw = el('div', 'who'); lw.append(el('b', null, '…')); liveEl.append(lw, el('div', 'body live'));
+  box.append(liveEl); renderLive(); renderSpeakers();
+  $('#recheckBtn').disabled = state.running || state.sample || state.utts.filter(u => u.emb).length < 2;
+  if (state.running && nearBottom) window.scrollTo(0, document.body.scrollHeight);
+}
+function renderLive() {
+  if (!liveEl) return;
+  liveEl.hidden = !state.interim;
+  liveEl.lastChild.textContent = state.interim;
+  const last = state.utts[state.utts.length - 1], sp = last && spkById(last.spk);
+  liveEl.firstChild.style.setProperty('--c', cvar(sp));
+  liveEl.firstChild.firstChild.textContent = 'Listening';
+}
+function talkStats() {
+  const m = new Map();
+  for (const u of state.utts) { const r = m.get(u.spk) || { sec: 0, words: 0 }; r.sec += Math.max(0.5, u.t1 - u.t0); r.words += u.text.split(/\s+/).length; m.set(u.spk, r); }
+  return m;
+}
+function renderSpeakers() {
+  const ul = $('#speakerList'); ul.textContent = ''; const st = talkStats();
+  for (const s of state.speakers) {
+    const li = el('li'); li.style.setProperty('--c', cvar(s));
+    const inp = el('input'); inp.value = s.name; inp.id = 'spk-' + s.id; inp.setAttribute('aria-label', 'Speaker name');
+    inp.addEventListener('change', () => { s.name = inp.value.trim() || s.name; s.custom = true; render(); if (!$('#summary').hidden) renderSummary(); save(); });
+    li.append(el('span', 'dot'), inp, el('span', 'tt', fmt((st.get(s.id) || { sec: 0 }).sec)));
+    ul.append(li);
+  }
+  $('#spkHint').textContent = state.speakers.length ? 'Click a name to rename it. Times show how long each person talked.' : 'Speakers show up here once someone talks. Click a name to rename it.';
+}
+function renderLiveLoop() {
+  const f = Math.max(0, Math.min(1, (audio.db + 70) / 55));
+  $('#meterFill').style.width = (state.running ? f * 100 : 0) + '%';
+  const vs = $('#vadState');
+  vs.textContent = state.running ? (audio.inSpeech ? 'Speech' : 'Quiet') : state.stopping ? 'Finishing' : 'Mic off';
+  vs.classList.toggle('talk', state.running && audio.inSpeech);
+  requestAnimationFrame(renderLiveLoop);
+}
+function tick() { if (state.running) { $('#clock').textContent = fmt(now()); setTimeout(tick, 250); } }
+function updateUI() {
+  const b = $('#recBtn'); b.classList.toggle('on', state.running);
+  b.textContent = state.running ? 'Stop' : state.stopping ? 'Finishing…' : state.utts.length && !state.sample ? 'Continue recording' : 'Start recording';
+  b.disabled = state.stopping;
+  $('#clock').textContent = fmt(state.running ? now() : state.timeBase);
+  $('#empty').hidden = state.utts.length > 0 || state.running;
+  $('#recheckBtn').disabled = state.running || state.sample || state.utts.filter(u => u.emb).length < 2;
+  ['lang'].forEach(id => $('#' + id).disabled = false);
+}
+
+/* ---------------- key takeaways ---------------- */
+const STOP = new Set(('a an the and or but if then so of to in on at for with from by as is are was were be been being am do does did done have has had having i me my mine we us our ours you your yours he him his she her it its they them their this that these those there here what which who whom when where why how all any both each few more most other some such no nor not only own same than too very can could will would shall should may might must just also yeah yes okay ok oh um uh like really actually basically get got go going gonna know think mean right well kind sort thing things lot little bit want say said one two let lets let\'s i\'m we\'re you\'re it\'s that\'s don\'t can\'t i\'ll we\'ll gonna wanna dont im thats about into out up down over again because while through during before after above below off now even still back way make made need see look time today'
+  + ' el la los las un una unos unas y o pero si de del al a en con por para como que qué es son era fue ser estar está están estoy hay muy más menos ya no sí lo le les se su sus mi mis tu tus yo tú él ella nosotros ellos esto eso este esta ese esa entonces pues bueno vale también porque cuando donde hacer tener').split(/\s+/));
+const tokens = t => t.toLowerCase().replace(/[^a-z0-9áéíóúñü'$%\s-]/g, ' ').split(/\s+/).filter(Boolean);
+const stem = w => w.length > 4 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
+const content = t => tokens(t).map(w => w.replace(/^'+|'+$/g, '')).filter(w => w.length > 2 && !STOP.has(w)).map(stem);
+const RX_ACTION = /\b(i'll|i will|we'll|we will|you'll|you will|he'll|she'll|they'll|i need to|we need to|you need to|need to|needs to|have to|has to|got to|gotta|we should|you should|i should|let's (?!get started|start|begin|move on|go with|see|talk|recap)|let us|i'm going to|we're going to|going to|make sure|follow up|follow-up|send|email|schedule|set up|reach out|circle back|take care of|handle|assign|deadline|due|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight|next week|end of (the )?(day|week|month))|voy a|vamos a|tengo que|tenemos que|hay que|necesito|necesitamos|debemos|mandar|enviar)\b/i;
+const RX_DECIDE = /\b(decided|we agreed|agreed|agree on|let's go with|go with|we're going with|final decision|settled on|approved|signed off|confirmed|the plan is|decidimos|acordamos|quedamos en)\b/i;
+const RX_Q = /^(what|how|why|when|where|who|which|can|could|should|would|do|does|did|is|are|will|have|has|any|qué|cómo|por qué|cuándo|dónde|quién|cuál|puedes|podemos|hay)\b/i;
+const RX_CUE = /\b(important|key|main|priority|goal|biggest|focus|problem|issue|risk|budget|deadline|decid|agree|plan|result|number|revenue|cost|launch|next step|important|clave|importante|objetivo|problema)\w*/i;
+function summarize() {
+  const utts = state.utts; if (!utts.length) return null;
+  const tf = new Map(); utts.forEach(u => new Set(content(u.text)).forEach(w => tf.set(w, (tf.get(w) || 0) + 1)));
+  const bi = new Map();
+  utts.forEach(u => { const c = content(u.text); for (let i = 0; i < c.length - 1; i++) { const k = c[i] + ' ' + c[i + 1]; if (c[i] !== c[i + 1]) bi.set(k, (bi.get(k) || 0) + 1); } });
+  const scored = utts.map((u, i) => {
+    const c = [...new Set(content(u.text))], wc = u.text.split(/\s+/).length;
+    let s = c.reduce((a, w) => a + Math.log(1 + (tf.get(w) || 0)), 0) / Math.sqrt(Math.max(4, c.length));
+    if (RX_CUE.test(u.text)) s *= 1.35; if (RX_DECIDE.test(u.text)) s *= 1.3; if (/\d|\$|%/.test(u.text)) s *= 1.15;
+    if (wc < 6) s *= 0.4;
+    return { u, i, s, set: new Set(c) };
+  });
+  const want = Math.max(3, Math.min(8, Math.round(utts.length / 6)));
+  const picked = [], pool = scored.filter(x => x.set.size >= 3);
+  while (picked.length < want && pool.length) {                       // pick strong lines, skip near-repeats (MMR)
+    let best = null, bv = -Infinity;
+    for (const x of pool) {
+      let sim = 0; for (const p of picked) { let inter = 0; x.set.forEach(w => p.set.has(w) && inter++); sim = Math.max(sim, inter / (x.set.size + p.set.size - inter)); }
+      const v = x.s * (1 - 0.8 * sim); if (v > bv) { bv = v; best = x; }
+    }
+    picked.push(best); pool.splice(pool.indexOf(best), 1);
+  }
+  picked.sort((a, b) => a.i - b.i);
+  const isQ = t => /\?\s*$/.test(t) || (RX_Q.test(t.trim()) && t.split(/\s+/).length >= 4);
+  const actions = utts.filter(u => RX_ACTION.test(u.text) && !RX_DECIDE.test(u.text) && !isQ(u.text) && u.text.split(/\s+/).length >= 4).slice(0, 10);
+  const decisions = utts.filter(u => RX_DECIDE.test(u.text) && !isQ(u.text)).slice(0, 8);
+  const questions = utts.filter(u => isQ(u.text)).slice(0, 8);
+  const topics = [...[...bi].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k]) => k),
+                  ...[...tf].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([k]) => k)];
+  const topicList = []; for (const t of topics) { if (topicList.length >= 10) break; if (!topicList.some(x => x.includes(t) || t.includes(x))) topicList.push(t); }
+  const dur = state.sample ? utts[utts.length - 1].t1 : Math.max(state.timeBase, utts[utts.length - 1].t1);
+  return { takeaways: picked.map(x => x.u), actions, decisions, questions, topics: topicList, dur,
+    words: utts.reduce((a, u) => a + u.text.split(/\s+/).length, 0), talk: talkStats() };
+}
+function renderSummary() {
+  const box = $('#summary'), S = summarize(); box.textContent = '';
+  if (!S) { box.hidden = true; return; }
+  box.hidden = false;
+  box.append(el('h2', null, 'Key takeaways' + (state.sample ? ' · sample meeting' : '')));
+  const stats = el('div', 'stats');
+  [['Length', fmt(S.dur)], ['Words', S.words.toLocaleString()], ['Speakers', String(state.speakers.length)], ['Action items', String(S.actions.length)]]
+    .forEach(([k, v]) => { const d = el('div', 'stat'); d.append(el('span', null, k), el('strong', null, v)); stats.append(d); });
+  box.append(stats);
+  const totalSec = [...S.talk.values()].reduce((a, r) => a + r.sec, 0) || 1, bar = el('div', 'share'), leg = el('div', 'legend');
+  for (const s of state.speakers) {
+    const r = S.talk.get(s.id); if (!r) continue; const pct = Math.round(100 * r.sec / totalSec);
+    const i = el('i'); i.style.width = pct + '%'; i.style.setProperty('--c', cvar(s)); i.title = s.name + ' ' + pct + '%'; bar.append(i);
+    const l = el('span'); l.style.setProperty('--c', cvar(s)); l.append(el('b', null, s.name), document.createTextNode(' ' + pct + '% of talk time')); leg.append(l);
+  }
+  box.append(bar, leg);
+  const grid = el('div', 'sgrid');
+  const list = (title, items, cls) => {
+    if (!items.length) return; const sec = el('section', cls); sec.append(el('h3', null, title)); const ul = el('ul');
+    items.forEach(u => { const li = el('li', null, clean(u.text)); const sp = spkById(u.spk); li.append(el('small', null, (sp ? sp.name : 'Speaker') + ' · ' + fmt(u.t0))); ul.append(li); });
+    sec.append(ul); grid.append(sec);
+  };
+  list('Main points', S.takeaways, 'takeaways');
+  list('Action items', S.actions);
+  list('Decisions', S.decisions);
+  list('Open questions', S.questions);
+  if (S.topics.length) { const sec = el('section'); sec.append(el('h3', null, 'Topics that came up')); const c = el('div', 'chips'); S.topics.forEach(t => c.append(el('span', 'chip', t))); sec.append(c); grid.append(sec); }
+  box.append(grid);
+  box.append(el('p', 'sumnote', 'Picked from the transcript by wording and repetition. For a summary Claude writes itself, press Summarize with Claude.'));
+}
+
+/* ---------------- export ---------------- */
+function transcriptText() {
+  return blocks().map(b => (b.pause ? `[pause ${Math.round(b.pause)} s]\n\n` : '') + `[${fmt(b.t0)}] ${(spkById(b.spk) || { name: 'Speaker' }).name}: ` + b.utts.map(u => clean(u.text)).join(' ')).join('\n\n');
+}
+function markdown() {
+  const S = summarize(), d = new Date();
+  let md = `# Meeting transcript\n\n${d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`;
+  if (S) {
+    md += ` · ${fmt(S.dur)} · ${state.speakers.map(s => s.name).join(', ')}\n\n## Key takeaways\n\n`;
+    const sec = (t, a) => a.length ? `### ${t}\n\n` + a.map(u => `- ${clean(u.text)} *(${(spkById(u.spk) || { name: '' }).name}, ${fmt(u.t0)})*`).join('\n') + '\n\n' : '';
+    md += sec('Main points', S.takeaways) + sec('Action items', S.actions) + sec('Decisions', S.decisions) + sec('Open questions', S.questions);
+    if (S.topics.length) md += `### Topics\n\n${S.topics.join(', ')}\n\n`;
+  }
+  return md + '## Transcript\n\n' + blocks().map(b => (b.pause ? `*pause ${Math.round(b.pause)} s*\n\n` : '') + `**${(spkById(b.spk) || { name: 'Speaker' }).name}** \`${fmt(b.t0)}\`  \n` + b.utts.map(u => clean(u.text)).join(' ')).join('\n\n') + '\n';
+}
+function download(name, text, type) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
+  document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+async function copy(text, btn) {
+  const label = btn.textContent;
+  try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied'; }
+  catch (_) { const ta = el('textarea'); ta.value = text; document.body.append(ta); ta.select(); try { document.execCommand('copy'); btn.textContent = 'Copied'; } catch (e) { btn.textContent = 'Copy failed'; } ta.remove(); }
+  setTimeout(() => btn.textContent = label, 1400);
+}
+const stamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}${p(d.getMinutes())}`; };
+
+/* ---------------- speaker correction menu ---------------- */
+function openMenu(span) {
+  const u = state.utts.find(x => x.id === +span.dataset.id); if (!u) return;
+  const m = $('#menu'); m.textContent = ''; m.append(el('p', null, 'Who said this?'));
+  const choose = id => { u.spk = id; u.locked = true; state.edited = true; tidySpeakers(); closeMenu(); render(); if (!$('#summary').hidden) renderSummary(); save(); };
+  state.speakers.forEach(s => { const b = el('button'); b.type = 'button'; const i = el('i'); i.style.setProperty('--c', cvar(s)); b.append(i, document.createTextNode(s.name + (s.id === u.spk ? '  ✓' : ''))); b.onclick = () => choose(s.id); m.append(b); });
+  const nb = el('button', null, '+ New speaker'); nb.type = 'button'; nb.onclick = () => choose(newSpeaker()); m.append(nb);
+  m.hidden = false; const r = span.getBoundingClientRect();
+  m.style.left = Math.min(r.left, window.innerWidth - m.offsetWidth - 12) + 'px';
+  m.style.top = (r.bottom + 6 + m.offsetHeight > window.innerHeight ? r.top - m.offsetHeight - 6 : r.bottom + 6) + 'px';
+  m.querySelector('button').focus();
+}
+function closeMenu() { $('#menu').hidden = true; }
+
+/* ---------------- notices, persistence ---------------- */
+function notice(msg, info, actions) {
+  const n = $('#notice'); n.textContent = ''; n.className = 'notice' + (info ? ' info' : ''); n.append(el('span', null, msg));
+  (actions || []).forEach(([label, fn]) => { const b = el('button', 'btn', label); b.type = 'button'; b.onclick = fn; n.append(b); });
+  const x = el('button', 'btn', 'Dismiss'); x.type = 'button'; x.onclick = hideNotice; n.append(x); n.hidden = false;
+}
+function hideNotice() { $('#notice').hidden = true; }
+function save() {
+  if (state.sample) return;
+  try { localStorage.setItem(STORE_KEY, JSON.stringify({ v: 1, savedAt: Date.now(), utts: state.utts, speakers: state.speakers, nextUtt: state.nextUtt, nextSpk: state.nextSpk, timeBase: state.running ? now() : state.timeBase, g: { n: audio.g.n, mean: [...audio.g.mean], m2: [...audio.g.m2] }, FD })); } catch (_) {}
+}
+function restore(d) {
+  Object.assign(state, { utts: d.utts, speakers: d.speakers, nextUtt: d.nextUtt, nextSpk: d.nextSpk, timeBase: d.timeBase, sample: false });
+  if (d.g) { audio.g.n = d.g.n; audio.g.mean = Float64Array.from(d.g.mean); audio.g.m2 = Float64Array.from(d.g.m2); }
+  if (d.FD) FD = d.FD;
+  render(); renderSummary(); updateUI(); hideNotice();
+}
+function clearAll() {
+  Object.assign(state, { utts: [], speakers: [], nextUtt: 1, nextSpk: 1, timeBase: 0, interim: '', sample: false, edited: false });
+  audio.g = { n: 0, mean: new Float64Array(NCEP), m2: new Float64Array(NCEP) };
+  try { localStorage.removeItem(STORE_KEY); } catch (_) {}
+  $('#summary').hidden = true; render(); updateUI();
+}
+
+/* ---------------- sample meeting (example text, no audio) ---------------- */
+function loadSample() {
+  clearAll(); state.sample = true;
+  const names = ['Maya', 'Luis', 'Priya'];
+  names.forEach(n => { const id = newSpeaker(); const s = spkById(id); s.name = n; s.custom = true; });
+  const L = [
+    [1, 0, 'okay let\'s get started the main goal today is to lock the launch date for the budgeting app'],
+    [1, 6, 'we have three things to cover the beta feedback the launch date and the marketing budget'],
+    [2, 13, 'the beta feedback was mostly positive about 80% of testers said the budgeting dashboard was easy to use'],
+    [2, 20, 'the biggest problem was the bank sync it failed for about one in ten testers'],
+    [3, 27, 'is the bank sync issue on our side or the provider\'s side'],
+    [2, 31, 'mostly the provider but we can add a retry that should fix most of the failures'],
+    [2, 37, 'I\'ll have the retry fix ready by Friday'],
+    [1, 52, 'good so the launch date if the fix lands Friday can we still launch on the 15th'],
+    [3, 58, 'I think the 15th works if QA gets two full days with the fix'],
+    [1, 64, 'okay we agreed then the launch date is the 15th with QA starting Monday'],
+    [3, 71, 'for the marketing budget I want to put most of it into short videos for students'],
+    [3, 77, 'the budget is $4,000 and I\'d split it 70% video and 30% campus ambassadors'],
+    [1, 85, 'that split makes sense let\'s go with 70 30 for the first month'],
+    [2, 91, 'should we hold back part of the budget in case the sync problem comes back'],
+    [1, 97, 'good question let\'s keep $500 in reserve and revisit after launch week'],
+    [3, 104, 'I\'ll send the video plan to everyone by Wednesday'],
+    [1, 110, 'great Luis owns the retry fix Priya owns the video plan and I\'ll schedule QA for Monday']
+  ];
+  L.forEach(([s, t, text], i) => { const next = L[i + 1]; const end = Math.min(t + 2 + text.split(' ').length * 0.32, next ? next[1] - 0.4 : t + 6); state.utts.push({ id: state.nextUtt++, text, t0: t, t1: end, emb: null, spk: s, locked: false }); });
+  state.timeBase = 116; render(); renderSummary(); updateUI();
+  notice('Sample meeting loaded. This is example text, not a recording. Press Start recording to begin your own.', true);
+}
+
+/* ---------------- wiring ---------------- */
+$('#recBtn').onclick = () => state.running ? stop() : start();
+$('#sampleBtn').onclick = loadSample;
+$('#copyTxt').onclick = e => copy(transcriptText(), e.currentTarget);
+const SUMMARIZER_URL = 'https://claude.ai/artifact/BnvPwRu6a7DugSEaR2g3eW';
+$('#copyClaude').onclick = async e => {
+  if (!state.utts.length) { notice('There is no transcript yet. Record a meeting or load the sample first.', true); return; }
+  await copy(transcriptText(), e.currentTarget);
+  const w = window.open(SUMMARIZER_URL, '_blank'); if (w) w.opener = null;
+  notice('Transcript copied. In Meeting Summarizer, click in the transcript box, select all, paste, then press Write summary.' + (w ? '' : ' If it did not open, go to ' + SUMMARIZER_URL), true);
+};
+$('#dlTxt').onclick = () => download(`Transcript ${stamp()}.txt`, transcriptText(), 'text/plain');
+$('#dlMd').onclick = () => download(`Meeting notes ${stamp()}.md`, markdown(), 'text/markdown');
+let clearArmed = null;
+$('#clearBtn').onclick = e => {
+  const b = e.currentTarget; if (state.running) return;
+  if (clearArmed) { clearTimeout(clearArmed); clearArmed = null; b.textContent = 'Clear'; clearAll(); return; }
+  b.textContent = 'Click again to clear'; clearArmed = setTimeout(() => { clearArmed = null; b.textContent = 'Clear'; }, 3000);
+};
+$('#transcript').addEventListener('click', e => { const s = e.target.closest('.u'); if (s) { e.stopPropagation(); openMenu(s); } });
+$('#transcript').addEventListener('keydown', e => { const s = e.target.closest('.u'); if (s && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openMenu(s); } });
+document.addEventListener('click', e => { if (!e.target.closest('#menu')) closeMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+$('#lang').onchange = e => { settings.lang = e.target.value; if (state.running) { try { rec.onend = null; rec.abort(); } catch (_) {} startRec(); } };
+$('#paraGap').oninput = e => { settings.paraGap = +e.target.value; $('#paraGapVal').textContent = settings.paraGap.toFixed(1) + ' s'; render(); };
+$('#sens').oninput = e => { settings.sens = +e.target.value; $('#sensVal').textContent = settings.sens; };
+$('#maxSpk').onchange = e => { settings.maxSpk = +e.target.value; };
+$('#recheckBtn').onclick = () => recluster(true);
+window.addEventListener('beforeunload', save);
+
+try {
+  const d = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+  if (d && d.utts && d.utts.length) notice(`You have an unfinished transcript from ${new Date(d.savedAt).toLocaleString()} (${d.utts.length} lines).`, true,
+    [['Restore it', () => restore(d)], ['Start fresh', () => { try { localStorage.removeItem(STORE_KEY); } catch (_) {} hideNotice(); }]]);
+} catch (_) {}
+render(); updateUI(); renderLiveLoop();
+</script>
+</body>
+</html>
