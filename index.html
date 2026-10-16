@@ -56,6 +56,24 @@ button{cursor:pointer}
 .notice{margin:12px 20px 0;padding:10px 14px;border:1px solid var(--line);border-left:3px solid var(--rec);
   background:var(--surface);border-radius:6px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
 .notice.info{border-left-color:var(--accent)}
+.btn.file{display:inline-flex;align-items:center;padding:8px 14px;border-radius:999px;font-size:14px;font-weight:600;cursor:pointer}
+.btn.file.off{opacity:.45;pointer-events:none}
+.job{margin:12px 20px 0;padding:12px 14px;border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--surface);border-radius:6px;
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 14px;align-items:center}
+.job .jt{min-width:0;display:flex;flex-wrap:wrap;gap:2px 12px;align-items:baseline}
+.job .jt b{font-weight:600;overflow-wrap:anywhere}
+.job .jt span{font-size:13px;color:var(--muted)}
+.job .track{grid-column:1/-1;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.job .track i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.job .track.busy i{width:30%!important;animation:slide 1.2s ease-in-out infinite alternate}
+@keyframes slide{from{margin-left:0}to{margin-left:70%}}
+.player{position:sticky;top:var(--barH,72px);z-index:3;background:var(--paper);padding:0 0 12px;margin:0 0 4px}
+.player video{display:block;width:100%;max-height:240px;background:#000;border-radius:8px}
+.player.audio video{height:54px;background:transparent}
+.player .pname{font-size:12px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
+.who time.seek{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.who time.seek:hover{color:var(--accent)}
+.u.now{background:var(--hl)}
 
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:28px;padding:20px;max-width:1240px;margin:0 auto}
 @media (max-width:860px){.layout{grid-template-columns:minmax(0,1fr)}}
@@ -131,23 +149,31 @@ details.panel b{font-weight:600}
 .menu button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:none;padding:6px 8px;border-radius:5px;font-size:14px}
 .menu button:hover{background:var(--hl)}
 .menu button i{width:8px;height:8px;border-radius:50%;background:var(--c)}
-@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}.job .track.busy i{animation:none}}
 </style>
 </head>
 <body>
 <header class="bar">
-  <div class="brand">Meeting Transcriber<small>Live transcript, speaker changes, key takeaways</small></div>
+  <div class="brand">Meeting Transcriber<small>Live meetings or video files: transcript, speaker changes, key takeaways</small></div>
   <div class="controls">
     <button id="recBtn" class="rec" type="button">Start recording</button>
+    <label class="btn file" id="fileBtn" for="fileIn">Transcribe a video</label>
+    <input type="file" id="fileIn" hidden accept="video/*,audio/*,.mov,.mp4,.m4v,.m4a,.mp3,.wav,.webm,.mkv,.ogg,.aac,.flac">
     <span id="clock" class="mono" aria-label="Elapsed time">00:00</span>
     <div class="meter" aria-hidden="true"><div id="meterFill"></div></div>
     <span id="vadState" class="state" aria-live="polite">Mic off</span>
   </div>
 </header>
 <div id="notice" class="notice" hidden></div>
+<div id="job" class="job" hidden aria-live="polite">
+  <div class="jt"><b id="jobName"></b><span id="jobStage"></span></div>
+  <button class="btn" id="jobCancel" type="button">Stop</button>
+  <div class="track" id="jobTrack"><i id="jobFill"></i></div>
+</div>
 
 <main class="layout">
   <div class="doc">
+    <div id="player" class="player" hidden><video id="vid" controls playsinline preload="metadata"></video><div class="pname" id="pname"></div></div>
     <div id="summary" class="summary" hidden></div>
     <div class="head">
       <h2>Transcript</h2>
@@ -167,6 +193,7 @@ details.panel b{font-weight:600}
           <li>When the voice changes, a new speaker label starts. Click any line to move it to a different speaker. Rename speakers on the right.</li>
           <li>Press <b>Stop</b> and the key takeaways, action items, decisions and open questions appear above the transcript.</li>
         </ol>
+        <p>Have a recording already? Press <b>Transcribe a video</b>, or drag a video or audio file onto this page.</p>
         <button class="btn" id="sampleBtn" type="button">Load a sample meeting</button>
       </div>
     </div>
@@ -210,6 +237,14 @@ details.panel b{font-weight:600}
           <option value="4">4</option><option value="5">5</option><option value="6">6</option>
         </select>
       </div>
+      <div class="field">
+        <label for="model">Video transcription</label>
+        <select id="model">
+          <option value="base">Standard (faster)</option>
+          <option value="small">More accurate (slower)</option>
+        </select>
+        <div class="row"><span>First use downloads the speech model once: about 100 MB for Standard, 300 MB for More accurate.</span></div>
+      </div>
       <button class="btn" id="recheckBtn" type="button" disabled>Re-check speakers</button>
       <p class="hint">Re-check runs speaker grouping again over the whole recording with these settings. Lines you moved by hand stay where you put them.</p>
     </section>
@@ -219,6 +254,7 @@ details.panel b{font-weight:600}
       <p><b>Speech to text.</b> Your browser's built-in speech recognizer types the words. Chrome sends the audio to Google's speech service to do this; Safari on a Mac can run it on the device.</p>
       <p><b>Pause detection.</b> The page measures loudness about 23 times a second and learns the room's background level. Sound well above that level counts as speech; quiet longer than your pause setting starts a new paragraph.</p>
       <p><b>Speaker changes.</b> For each stretch of speech it builds a small voiceprint: the shape of the voice's spectrum (MFCCs, the same features pro tools start from) plus the speaker's pitch. A stretch that doesn't match any known voiceprint starts a new speaker. When you stop, it groups every stretch again with the full recording in view, which is more accurate than the live guess.</p>
+      <p><b>Videos and audio files.</b> The page pulls the sound out of the file, finds the stretches of speech, and runs Whisper, an open-source speech model, inside your browser on each stretch. The model downloads once and is then kept by the browser. The file and its audio never leave your computer.</p>
       <p><b>Takeaways.</b> The summary picks the lines that carry the meeting's most repeated subjects, then pulls out commitments, decisions and questions by their wording. For a summary Claude writes itself, press <b>Summarize with Claude</b>: it copies the transcript and opens Meeting Summarizer, where you paste it.</p>
     </details>
   </aside>
@@ -235,9 +271,9 @@ const STORE_KEY = 'meeting-transcriber.session.v1';
 const state = {
   utts: [], speakers: [], nextUtt: 1, nextSpk: 1,
   running: false, stopping: false, t0: 0, timeBase: 0,
-  interim: '', interimSince: null, sample: false, edited: false
+  interim: '', interimSince: null, sample: false, edited: false, source: 'live'
 };
-const settings = { lang: 'en-US', paraGap: 1.5, longPause: 5, sens: 6, maxSpk: 0 };
+const settings = { lang: 'en-US', paraGap: 1.5, longPause: 5, sens: 6, maxSpk: 0, model: 'base' };
 const thr = () => 1.2 - settings.sens * 0.09;           // voiceprint distance that counts as "same speaker"
 const now = () => (performance.now() - state.t0) / 1000;
 
@@ -306,7 +342,7 @@ function pitch(buf, sr) {
 }
 
 /* ---------------- audio engine: VAD + voiceprint per speech segment ---------------- */
-const audio = { ctx: null, stream: null, proc: null, noise: -50, db: -90, inSpeech: false, onCount: 0, silentFor: 0,
+const audio = { ctx: null, sr: 48000, frames: null, stream: null, proc: null, noise: -50, db: -90, inSpeech: false, onCount: 0, silentFor: 0,
   lastLoudT: 0, seg: null, segments: [], g: { n: 0, mean: new Float64Array(NCEP), m2: new Float64Array(NCEP) } };
 const newSeg = t => ({ t0: t, t1: t, n: 0, sum: new Float64Array(NCEP), pitches: [] });
 function processFrame(buf, t) {
@@ -332,7 +368,8 @@ function addFeatures(seg, buf) {
   const c = mfcc(buf), g = audio.g; g.n++;
   for (let i = 0; i < NCEP; i++) { seg.sum[i] += c[i]; const d = c[i] - g.mean[i]; g.mean[i] += d / g.n; g.m2[i] += d * (c[i] - g.mean[i]); }
   seg.n++; seg.t1 = audio.lastLoudT;
-  const p = pitch(buf, audio.ctx.sampleRate); if (p) seg.pitches.push(p);
+  const p = pitch(buf, audio.sr); if (p) seg.pitches.push(p);
+  if (audio.frames) audio.frames.push({ t: audio.lastLoudT, c, p });
 }
 const median = a => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y); return b[b.length >> 1]; };
 function embOf(segs) {
@@ -468,7 +505,9 @@ function startRec() {
 async function start() {
   hideNotice();
   if (!SR) { notice('This browser has no built-in speech recognition. Open this file in Google Chrome, or Safari on a recent Mac.'); return; }
-  if (state.sample) { state.utts = []; state.speakers = []; state.sample = false; $('#summary').hidden = true; state.timeBase = 0; }
+  if (job.running) return;
+  if (state.sample || state.source === 'file') { clearAll(); setPlayer(null); }
+  state.source = 'live';
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } }); }
   catch (e) { notice('The microphone is blocked or missing. Allow microphone access for this page in the browser\'s address bar, then press Start again.'); return; }
@@ -477,7 +516,7 @@ async function start() {
   const src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(N, 1, 1), sink = ctx.createGain();
   sink.gain.value = 0; proc.onaudioprocess = e => processFrame(e.inputBuffer.getChannelData(0), now());
   src.connect(proc); proc.connect(sink); sink.connect(ctx.destination);
-  Object.assign(audio, { ctx, stream, proc, seg: null, segments: [], inSpeech: false, onCount: 0, silentFor: 0 });
+  Object.assign(audio, { ctx, sr: ctx.sampleRate, frames: null, stream, proc, seg: null, segments: [], inSpeech: false, onCount: 0, silentFor: 0 });
   state.t0 = performance.now() - state.timeBase * 1000;
   state.running = true; state.edited = false; $('#summary').hidden = true;
   startRec(); updateUI(); tick();
@@ -564,12 +603,13 @@ let liveEl = null;
 function render() {
   const box = $('#transcript'), nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 160;
   [...box.children].forEach(c => { if (c.id !== 'empty') c.remove(); });
-  $('#empty').hidden = state.utts.length > 0 || state.running;
+  $('#empty').hidden = state.utts.length > 0 || state.running || job.running;
   for (const b of blocks()) {
     if (b.pause) box.append(el('div', 'pause', 'pause · ' + Math.round(b.pause) + ' s'));
     const sp = spkById(b.spk), row = el('div', 'block'), who = el('div', 'who' + (b.cont ? ' cont' : ''));
     who.style.setProperty('--c', cvar(sp));
-    who.append(el('b', null, sp ? sp.name : 'Speaker'), el('time', null, fmt(b.t0)));
+    const tm = el('time', hasPlayer() ? 'seek' : null, fmt(b.t0)); tm.dataset.t = b.t0; if (hasPlayer()) tm.title = 'Play from here';
+    who.append(el('b', null, sp ? sp.name : 'Speaker'), tm);
     const body = el('div', 'body');
     b.utts.forEach(u => { const s = el('span', 'u' + (u.locked ? ' locked' : ''), clean(u.text) + ' '); s.dataset.id = u.id; s.tabIndex = 0; body.append(s); });
     row.append(who, body); box.append(row);
@@ -616,7 +656,8 @@ function tick() { if (state.running) { $('#clock').textContent = fmt(now()); set
 function updateUI() {
   const b = $('#recBtn'); b.classList.toggle('on', state.running);
   b.textContent = state.running ? 'Stop' : state.stopping ? 'Finishing…' : state.utts.length && !state.sample ? 'Continue recording' : 'Start recording';
-  b.disabled = state.stopping;
+  b.disabled = state.stopping || job.running;
+  $('#fileBtn').classList.toggle('off', state.running || state.stopping || job.running);
   $('#clock').textContent = fmt(state.running ? now() : state.timeBase);
   $('#empty').hidden = state.utts.length > 0 || state.running;
   $('#recheckBtn').disabled = state.running || state.sample || state.utts.filter(u => u.emb).length < 2;
@@ -757,7 +798,8 @@ function restore(d) {
   render(); renderSummary(); updateUI(); hideNotice();
 }
 function clearAll() {
-  Object.assign(state, { utts: [], speakers: [], nextUtt: 1, nextSpk: 1, timeBase: 0, interim: '', sample: false, edited: false });
+  Object.assign(state, { utts: [], speakers: [], nextUtt: 1, nextSpk: 1, timeBase: 0, interim: '', sample: false, edited: false, source: 'live' });
+  audio.frames = null; if (typeof setPlayer === 'function' && !job.running) setPlayer(null);
   audio.g = { n: 0, mean: new Float64Array(NCEP), m2: new Float64Array(NCEP) };
   try { localStorage.removeItem(STORE_KEY); } catch (_) {}
   $('#summary').hidden = true; render(); updateUI();
@@ -792,6 +834,189 @@ function loadSample() {
   notice('Sample meeting loaded. This is example text, not a recording. Press Start recording to begin your own.', true);
 }
 
+/* ---------------- video and audio files: decode, find speech, Whisper in the browser ---------------- */
+const ASR_LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1';
+const MODELS = { base: 'Xenova/whisper-base', small: 'Xenova/whisper-small' };
+const ASR_SR = 16000, HOP = 1024, MAXWIN = 28;
+const job = { running: false, cancel: false, stage: '' };
+let asrCache = { key: null, fn: null, device: null }, playerURL = null;
+const langName = l => l.startsWith('es') ? 'spanish' : l.startsWith('fr') ? 'french' : 'english';
+const yieldUI = () => new Promise(r => setTimeout(r, 0));
+const hasPlayer = () => !$('#player').hidden;
+
+function setPlayer(file) {
+  const v = $('#vid');
+  if (playerURL) { URL.revokeObjectURL(playerURL); playerURL = null; }
+  if (!file) { v.removeAttribute('src'); v.load(); $('#player').hidden = true; return; }
+  playerURL = URL.createObjectURL(file); v.src = playerURL;
+  $('#player').classList.toggle('audio', /^audio\//.test(file.type) || /\.(m4a|mp3|wav|ogg|aac|flac)$/i.test(file.name));
+  $('#pname').textContent = file.name + ' · click a time in the transcript to play from there';
+  $('#player').hidden = false;
+}
+function showJob(name) { $('#jobName').textContent = name; $('#job').hidden = false; }
+function stage(text, frac) {
+  if (text != null) $('#jobStage').textContent = text;
+  const tr = $('#jobTrack'); tr.classList.toggle('busy', frac == null);
+  if (frac != null) $('#jobFill').style.width = Math.round(Math.max(0, Math.min(1, frac)) * 100) + '%';
+}
+async function decodeFile(file) {
+  const ctx = new OfflineAudioContext(1, ASR_SR, ASR_SR);               // decodes and resamples to 16 kHz
+  const ab = await ctx.decodeAudioData(await file.arrayBuffer());
+  const n = ab.length, out = new Float32Array(n), k = ab.numberOfChannels;
+  for (let c = 0; c < k; c++) { const d = ab.getChannelData(c); for (let i = 0; i < n; i++) out[i] += d[i] / k; }
+  return out;
+}
+async function analyze(pcm, onProgress) {
+  FD = HOP / ASR_SR; dec = 2; dbuf = new Float64Array(Math.floor(N / dec)); buildMel(ASR_SR);
+  Object.assign(audio, { sr: ASR_SR, frames: [], noise: -50, inSpeech: false, onCount: 0, silentFor: 0, lastLoudT: 0, seg: null, segments: [],
+    g: { n: 0, mean: new Float64Array(NCEP), m2: new Float64Array(NCEP) } });
+  const last = pcm.length - N;
+  for (let i = 0, k = 0; i <= last; i += HOP, k++) {
+    processFrame(pcm.subarray(i, i + N), (i + N / 2) / ASR_SR);
+    if (k % 400 === 0) { onProgress(i / pcm.length); await yieldUI(); if (job.cancel) break; }
+  }
+  if (audio.inSpeech && audio.seg) { audio.seg.t1 = audio.lastLoudT; if (audio.seg.n >= 4) audio.segments.push(audio.seg); audio.seg = null; audio.inSpeech = false; }
+  audio.db = -90;
+  return audio.segments.splice(0);
+}
+function makeWindows(segs, total) {
+  const W = []; let cur = null;
+  const push = (a, b) => { if (cur && b - cur.t0 <= MAXWIN && a - cur.t1 < 6) cur.t1 = b; else { if (cur) W.push(cur); cur = { t0: a, t1: b }; } };
+  for (const s of segs) {
+    let a = Math.max(0, s.t0 - 0.25); const b = Math.min(total, s.t1 + 0.35);
+    while (b - a > MAXWIN) { push(a, a + MAXWIN); a += MAXWIN; }
+    push(a, b);
+  }
+  if (cur) W.push(cur);
+  if (!W.length) for (let a = 0; a < total; a += MAXWIN) W.push({ t0: a, t1: Math.min(total, a + MAXWIN) });   // no clear speech found: transcribe it all
+  return W;
+}
+function framesIn(a, b) {
+  const F = audio.frames || []; let lo = 0, hi = F.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (F[m].t < a) lo = m + 1; else hi = m; }
+  const out = []; for (let i = lo; i < F.length && F[i].t <= b; i++) out.push(F[i]); return out;
+}
+function embFrames(fr) {
+  if (!fr.length) return null;
+  const m = new Array(NCEP).fill(0), ps = [];
+  for (const f of fr) { for (let i = 0; i < NCEP; i++) m[i] += f.c[i]; if (f.p) ps.push(f.p); }
+  return { m: m.map(v => v / fr.length), p: ps.length >= 5 ? median(ps) : null, n: fr.length };
+}
+function addChunks(out, w) {
+  const chunks = out && Array.isArray(out.chunks) && out.chunks.length ? out.chunks : [{ timestamp: [0, w.t1 - w.t0], text: (out && out.text) || '' }];
+  for (const c of chunks) {
+    const text = String(c.text || '').replace(/\s+/g, ' ').trim();
+    if (!text || /^[\[(♪*].*[\])♪*]$/.test(text)) continue;             // [Music], (applause) and similar
+    const ts = c.timestamp || [];
+    let a = w.t0 + (ts[0] ?? 0), b = w.t0 + (ts[1] ?? (w.t1 - w.t0));
+    a = Math.min(Math.max(a, w.t0), w.t1); b = Math.min(Math.max(b, a + 0.3), w.t1 + 0.5);
+    const parts = splitByVoice(text, a, b);
+    if (parts.length > 1) { parts.forEach(([pt, pa, pb]) => pushChunk(pt, pa, pb)); continue; }
+    pushChunk(text, a, b);
+  }
+}
+function changePoint(a, b) {                                            // the moment inside [a, b] where the voice changes most
+  const fr = framesIn(a, b), MIN = Math.ceil(1.5 / FD);                 // at least 1.5 s of speech on each side
+  if (fr.length < 2 * MIN) return null;
+  const sd = gStd(); let best = null, bd = 0;
+  for (let i = MIN; i <= fr.length - MIN; i += 2) {
+    const d = dist(embFrames(fr.slice(Math.max(0, i - 2 * MIN), i)), embFrames(fr.slice(i, i + 2 * MIN)), sd);
+    if (d > bd) { bd = d; best = i; }
+  }
+  if (best == null || bd < thr() * 1.3) return null;
+  if (dist(embFrames(fr.slice(0, best)), embFrames(fr.slice(best)), sd) < thr() * 1.15) return null;  // the two sides as wholes must differ too
+  return { t: (fr[best - 1].t + fr[best].t) / 2, before: best, after: fr.length - best };
+}
+function splitByVoice(text, a, b, depth = 0) {                          // one chunk, two voices with no real pause between them
+  const words = text.split(' ');
+  if (words.length < 4 || depth > 2) return [[text, a, b]];
+  const cp = changePoint(a, b); if (!cp) return [[text, a, b]];
+  const k = Math.min(words.length - 1, Math.max(1, Math.round(words.length * cp.before / (cp.before + cp.after))));
+  return [...splitByVoice(words.slice(0, k).join(' '), a, cp.t, depth + 1), ...splitByVoice(words.slice(k).join(' '), cp.t, b, depth + 1)];
+}
+function pushChunk(text, a, b) {
+  const fr = framesIn(a, b), emb = embFrames(fr);
+  const t0 = fr.length ? Math.max(a, fr[0].t - FD) : a, t1 = fr.length ? fr[fr.length - 1].t : b;
+  const prev = state.utts.length ? state.utts[state.utts.length - 1].spk : null;
+  state.utts.push({ id: state.nextUtt++, text, t0, t1: Math.max(t1, t0 + 0.2), emb, spk: assignOnline(emb, prev), locked: false });
+}
+async function loadAsr(onProgress) {
+  if (window.__asrHook) return { fn: window.__asrHook, device: 'test' };
+  const key = settings.model;
+  if (asrCache.key === key) return asrCache;
+  job.stage = 'model';
+  const { pipeline, env } = await import(ASR_LIB);
+  env.allowLocalModels = false;
+  const files = new Map();
+  const progress_callback = p => {
+    if (p.status !== 'progress' || !p.total) return;
+    files.set(p.file, [p.loaded, p.total]); let a = 0, b = 0; files.forEach(([x, y]) => { a += x; b += y; }); onProgress(a, b);
+  };
+  let fn = null, device = 'wasm';
+  try {
+    const adapter = navigator.gpu && await navigator.gpu.requestAdapter();
+    if (adapter) {
+      const enc = key === 'small' && adapter.features.has('shader-f16') ? 'fp16' : 'fp32';
+      fn = await pipeline('automatic-speech-recognition', MODELS[key], { device: 'webgpu', dtype: { encoder_model: enc, decoder_model_merged: 'q4' }, progress_callback });
+      device = 'webgpu';
+    }
+  } catch (e) { console.warn('Graphics-card speech model unavailable, using the processor instead.', e); fn = null; }
+  if (!fn) fn = await pipeline('automatic-speech-recognition', MODELS[key], { device: 'wasm', dtype: 'q8', progress_callback });
+  asrCache = { key, fn, device }; return asrCache;
+}
+async function transcribeFile(file) {
+  if (!file || state.running || state.stopping || job.running) return;
+  const isMedia = /^(audio|video)\//.test(file.type) || /\.(mp4|m4v|mov|mkv|webm|m4a|mp3|wav|ogg|oga|aac|flac)$/i.test(file.name);
+  if (!isMedia) { notice('"' + file.name + '" is not a video or audio file. Choose an MP4, MOV, WebM, M4A, MP3 or WAV file.'); return; }
+  if (file.size > 1.9e9) { notice('This file is too large to open in the browser (the limit is about 1.9 GB). Export a smaller copy, or just the audio as M4A or MP3, and try again.'); return; }
+  hideNotice(); clearAll(); state.source = 'file';
+  Object.assign(job, { running: true, cancel: false, stage: 'decode' }); updateUI();
+  showJob(file.name); setPlayer(file); render();
+  try {
+    stage('Reading the audio track…', null);
+    const pcm = await decodeFile(file);
+    const total = pcm.length / ASR_SR; state.timeBase = total; $('#clock').textContent = fmt(total);
+    job.stage = 'analyze'; stage('Finding speech and telling voices apart…', 0);
+    const segs = await analyze(pcm, f => stage(null, f));
+    if (job.cancel) throw { cancelled: true };
+    const wins = makeWindows(segs, total), speechSec = wins.reduce((s, w) => s + w.t1 - w.t0, 0);
+    stage('Loading the speech model…', null);
+    const asr = await loadAsr((a, b) => stage(`Downloading the speech model (first time only): ${Math.round(a / 1e6)} of ${Math.round(b / 1e6)} MB`, a / b));
+    job.stage = 'asr';
+    const opts = { language: langName(settings.lang), task: 'transcribe', return_timestamps: true, chunk_length_s: 30, stride_length_s: 5 };
+    let done = 0; const t0 = performance.now();
+    stage(`Transcribing… 00:00 of ${fmt(total)}`, 0);
+    for (const w of wins) {
+      if (job.cancel) break;
+      const slice = pcm.slice(Math.floor(w.t0 * ASR_SR), Math.ceil(w.t1 * ASR_SR));
+      const out = await asr.fn(slice, opts, w.t0);
+      addChunks(out, w); done += w.t1 - w.t0;
+      const el_ = (performance.now() - t0) / 1000, left = done > 0 ? el_ * (speechSec - done) / done : 0;
+      stage(`Transcribing… ${fmt(w.t1)} of ${fmt(total)}` + (done < speechSec && el_ > 5 ? ` · about ${Math.max(1, Math.round(left / 60))} min left` : ''), done / speechSec);
+      render(); await yieldUI();
+    }
+    if (state.utts.length) recluster(false);
+    render(); renderSummary(); save();
+    $('#job').hidden = true;
+    if (job.cancel) notice('Stopped early. The transcript and takeaways cover the part that was finished.', true);
+    else if (!state.utts.length) notice('No speech was found in this file.', true);
+    else notice(`Done: ${state.utts.length} lines from ${fmt(total)} of ${/^audio/.test(file.type) ? 'audio' : 'video'}. Click any time in the transcript to play from there.`, true);
+  } catch (e) {
+    $('#job').hidden = true;
+    if (e && e.cancelled) notice('Stopped.', true);
+    else if (job.stage === 'decode') notice('The audio in this file could not be read. Chrome reads MP4, MOV, WebM, M4A, MP3 and WAV. Try exporting the video as MP4 and drop it in again.');
+    else if (job.stage === 'model') notice('The speech model could not be downloaded. Check your internet connection and try again. After the first download it works offline.');
+    else { console.error(e); notice('Transcription stopped because of an error: ' + ((e && e.message) || e) + '. The part already transcribed is kept.'); if (state.utts.length) { render(); renderSummary(); save(); } }
+  } finally { job.running = false; updateUI(); }
+}
+function trackPlayback() {
+  const v = $('#vid'), t = v.currentTime;
+  const u = state.utts.find(x => t >= x.t0 - 0.15 && t <= x.t1 + 0.4);
+  document.querySelectorAll('.u.now').forEach(e => { if (!u || +e.dataset.id !== u.id) e.classList.remove('now'); });
+  if (u) { const sp = document.querySelector(`.u[data-id="${u.id}"]`); if (sp) sp.classList.add('now'); }
+}
+const setBarH = () => document.documentElement.style.setProperty('--barH', $('.bar').offsetHeight + 'px');
+
 /* ---------------- wiring ---------------- */
 $('#recBtn').onclick = () => state.running ? stop() : start();
 $('#sampleBtn').onclick = loadSample;
@@ -807,7 +1032,7 @@ $('#dlTxt').onclick = () => download(`Transcript ${stamp()}.txt`, transcriptText
 $('#dlMd').onclick = () => download(`Meeting notes ${stamp()}.md`, markdown(), 'text/markdown');
 let clearArmed = null;
 $('#clearBtn').onclick = e => {
-  const b = e.currentTarget; if (state.running) return;
+  const b = e.currentTarget; if (state.running || job.running) return;
   if (clearArmed) { clearTimeout(clearArmed); clearArmed = null; b.textContent = 'Clear'; clearAll(); return; }
   b.textContent = 'Click again to clear'; clearArmed = setTimeout(() => { clearArmed = null; b.textContent = 'Clear'; }, 3000);
 };
@@ -820,6 +1045,14 @@ $('#paraGap').oninput = e => { settings.paraGap = +e.target.value; $('#paraGapVa
 $('#sens').oninput = e => { settings.sens = +e.target.value; $('#sensVal').textContent = settings.sens; };
 $('#maxSpk').onchange = e => { settings.maxSpk = +e.target.value; };
 $('#recheckBtn').onclick = () => recluster(true);
+$('#model').onchange = e => { settings.model = e.target.value; };
+$('#fileIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; transcribeFile(f); };
+$('#jobCancel').onclick = () => { job.cancel = true; stage('Stopping after the current part…', null); };
+document.addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
+document.addEventListener('drop', e => { if (!e.dataTransfer.files.length) return; e.preventDefault(); transcribeFile(e.dataTransfer.files[0]); });
+$('#transcript').addEventListener('click', e => { const t = e.target.closest('time.seek'); if (!t) return; const v = $('#vid'); v.currentTime = +t.dataset.t; v.play().catch(() => {}); }, true);
+$('#vid').addEventListener('timeupdate', trackPlayback);
+window.addEventListener('resize', setBarH); setBarH();
 window.addEventListener('beforeunload', save);
 
 try {

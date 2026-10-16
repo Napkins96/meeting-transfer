@@ -1,3 +1,4 @@
 test/*.wav
 test/*.png
 __pycache__/
+test/*.webm
